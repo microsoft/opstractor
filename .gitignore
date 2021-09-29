@@ -1,0 +1,5 @@
+/.vscode/
+/logs/
+/build/
+*.so
+/*.egg-info/
