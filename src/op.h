@@ -80,17 +80,18 @@ public:
     return duration_;
   }
 
+  void pushChild(std::shared_ptr<Op> child) {
+    children_.push_back(child);
+  }
+
   void addInvocation(duration_t invocation_duration) noexcept {
     duration_ += invocation_duration;
     invocation_count_++;
   }
 
-  void pushChild(std::shared_ptr<Op> child) {
-    children_.push_back(child);
-  }
-
   void merge(std::shared_ptr<Op> other) {
-
+    duration_ += other->duration_;
+    invocation_count_ += other->invocation_count_;
   }
 
   void write(std::ostream& writer) const {
