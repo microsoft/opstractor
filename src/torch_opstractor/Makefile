@@ -10,10 +10,7 @@ extension:
 
 .PHONY: clean
 clean:
-	python setup.py clean --all
-	rm -f *.so
-	rm -rf *.egg-info
-	rm -rf logs
+	python setup.py clean
 
 .PHONY: test
 test:
