@@ -88,21 +88,23 @@ class OpNode:
         a.op.name == b.op.name and
           a.op.schema == b.op.schema)
 
-def write_flame_graph(node: OpNode, writer: io.StringIO):
+def write_flame_graph(
+  node: OpNode,
+  writer: io.StringIO,
+  value_producer: Callable[[Op], str]):
   writer.write('{"name":"')
   writer.write(node.op.schema if node.op.schema else node.op.name)
   writer.write('","value":')
   if node.invocation_count < 1:
     writer.write('null')
   else:
-    writer.write(str(node.cuml_total_duration_ns
-      / float(node.invocation_count)))
+    writer.write(value_producer(node))
   if len(node.children) > 0:
     writer.write(',"children":[')
     for i, child in enumerate(node.children):
       if i > 0:
         writer.write(',')
-      write_flame_graph(child, writer)
+      write_flame_graph(child, writer, value_producer)
     writer.write(']')
   writer.write('}')
   writer.flush()
@@ -162,7 +164,10 @@ class OpstractorSession:
   def on_update(self):
     r = len(self._distinct_graphs.children) / float(self._total_graphs)
     if r < 0.005:
-      write_flame_graph(self._distinct_graphs, sys.stderr)
+      write_flame_graph(
+        self._distinct_graphs,
+        sys.stderr,
+        lambda node: str(node.invocation_count))
       _C.terminate_session()
 
 default_session = OpstractorSession()
