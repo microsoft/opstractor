@@ -187,36 +187,43 @@ static const std::optional<const std::string> getOpSchema(
 using PyOpCallFunc = std::function<void(const std::shared_ptr<OpCall>)>;
 using PyOpRetFunc = std::function<void(const std::shared_ptr<OpRet>)>;
 
-// FIXME: default handlers should raise an exception
-// to indicate install_session_hooks was not called
-static PyOpCallFunc py_op_call_ = [](auto call){};
-static PyOpRetFunc py_op_ret_ = [](auto ret){};
+static PyOpCallFunc py_op_call_ = nullptr;
+static PyOpRetFunc py_op_ret_ = nullptr;
 
 static OpTable op_table{};
 static std::optional<std::chrono::time_point<OpClock>> first_call_time_{};
 
-PYBIND11_MODULE(_C, m) {
-  Op::pyBind(m);
-  OpCall::pyBind(m);
-  OpRet::pyBind(m);
+PYBIND11_MODULE(_C, py_module) {
+  Op::pyBind(py_module);
+  OpCall::pyBind(py_module);
+  OpRet::pyBind(py_module);
 
-  m.def(
-    "install_session_hooks",
-    [](PyOpCallFunc op_call, PyOpRetFunc op_ret) {
-      py_op_call_ = op_call;
-      py_op_ret_ = op_ret;
-    },
-    py::arg("op_call") = nullptr,
-    py::arg("op_ret") = nullptr)
-  .def(
-    "terminate_session",
-    [](int exit_code) {
-      std::exit(exit_code);
-    },
-    py::arg("exit_code") = 0);
+  py_module
+    .def(
+      "install_session_hooks",
+      [](PyOpCallFunc op_call, PyOpRetFunc op_ret) {
+        py_op_call_ = std::move(op_call);
+        py_op_ret_ = std::move(op_ret);
+      },
+      py::arg("op_call") = nullptr,
+      py::arg("op_ret") = nullptr)
+    .def(
+      "terminate_session",
+      [](int exit_code) {
+        std::exit(exit_code);
+      },
+      py::arg("exit_code") = 0)
+    .add_object("_cleanup", py::capsule([] {
+      py_op_call_ = nullptr;
+      py_op_ret_ = nullptr;
+    }));
 
   at::addThreadLocalCallback(at::RecordFunctionCallback(
     [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+      if (py_op_call_ == nullptr) {
+        return nullptr;
+      }
+
       const auto now_time = OpClock::now();
       if (!first_call_time_.has_value()) {
         first_call_time_ = now_time;
@@ -235,7 +242,7 @@ PYBIND11_MODULE(_C, m) {
     [](const at::RecordFunction& fn, at::ObserverContext* fn_ctx) {
       const auto now_time = OpClock::now() - first_call_time_.value();
 
-      if (fn_ctx != nullptr) {
+      if (fn_ctx != nullptr && py_op_ret_ != nullptr) {
         const auto call = dynamic_cast<OpstractorObserverContext*>(
           fn_ctx)->call();
 
