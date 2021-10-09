@@ -3,6 +3,7 @@
 
 import io
 import sys
+import atexit
 
 from typing import Callable, Optional, List
 
@@ -113,6 +114,7 @@ class OpstractorSession:
   _stack: List[OpNode]
   _distinct_graphs: OpNode
   _total_graphs: int
+  _analyses_written: bool
 
   def __init__(self):
     _C.install_session_hooks(
@@ -127,6 +129,10 @@ class OpstractorSession:
     self._stack = []
     self._distinct_graphs = root_graph
     self._total_graphs = 0
+    self._analyses_written = False
+
+  def __del__(self):
+    self.write_analyses()
 
   def op_call(self, call: OpCall):
     parent_node: Optional[OpNode] = None
@@ -164,10 +170,22 @@ class OpstractorSession:
   def on_update(self):
     r = len(self._distinct_graphs.children) / float(self._total_graphs)
     if r < 0.005:
-      write_flame_graph(
-        self._distinct_graphs,
-        sys.stderr,
-        lambda node: str(node.invocation_count))
+      self.write_analyses()
       _C.terminate_session()
 
+  def write_analyses(self):
+    if self._analyses_written:
+      return
+    self._analyses_written = True
+    write_flame_graph(
+      self._distinct_graphs,
+      sys.stderr,
+      lambda node: str(node.invocation_count))
+
 default_session = OpstractorSession()
+
+def _atexit():
+  global default_session
+  del default_session
+
+atexit.register(_atexit)
