@@ -253,7 +253,8 @@ PYBIND11_MODULE(_C, py_module) {
     })
     .scopes({
       at::RecordScope::FUNCTION,
-      at::RecordScope::BACKWARD_FUNCTION
+      at::RecordScope::BACKWARD_FUNCTION,
+      at::RecordScope::USER_SCOPE
     })
     .needsInputs(true)
     .needsOutputs(true));
