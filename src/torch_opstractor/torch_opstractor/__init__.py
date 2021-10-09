@@ -5,7 +5,7 @@ import io
 import sys
 import atexit
 
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Dict
 
 import torch
 from . import _C
@@ -69,25 +69,48 @@ class OpNode:
     self._cuml_total_duration_ns += other._cuml_total_duration_ns
     self._invocation_count += other._invocation_count
 
-  def traverse(
+  def traverse(self, visitor: Callable[['OpNode'], bool]) -> bool:
+    # visitor may return None (e.g. void) and traversal will continue;
+    # an explicit False must be returned to terminate traversal
+    if visitor(self) == False:
+      return False
+    for child in self.children:
+      if not child.traverse(visitor):
+        return False
+    return True
+
+  @staticmethod
+  def traverse2(
     a: 'OpNode',
     b: 'OpNode',
     visitor: Callable[['OpNode', 'OpNode'], bool]) -> bool:
     if a and b and visitor(a, b) and len(a.children) == len(b.children):
       for a_child, b_child in zip(a.children, b.children):
-        if not OpNode.traverse(a_child, b_child, visitor):
+        if not OpNode.traverse2(a_child, b_child, visitor):
           return False
     else:
       return False
     return True
 
   def is_same_by_name(self, other: 'OpNode'):
-    return OpNode.traverse(
+    return OpNode.traverse2(
       self,
       other,
       lambda a, b:
         a.op.name == b.op.name and
           a.op.schema == b.op.schema)
+
+def ns_duration_to_string(ns: int):
+  if ns <= 1000:
+    return f'{ns}ns'
+  us = ns / float(1000)
+  if us <= 1000:
+    return f'{us}µs'
+  ms = ns / float(1000000)
+  if ms <= 1000:
+    return f'{ms}ms'
+  s = ns / float(1000000000)
+  return f'{s}s'
 
 def write_flame_graph(
   node: OpNode,
@@ -109,6 +132,41 @@ def write_flame_graph(
     writer.write(']')
   writer.write('}')
   writer.flush()
+
+def write_distinct_op_table(
+  root_node: OpNode,
+  writer: io.StringIO,
+  top_level_only = False):
+  class Counters:
+    def __init__(self, op: Op):
+      self.op = op
+      self.count = 0
+      self.duration = 0
+
+  ops: Dict[str, Counters] = {}
+
+  def visitor(node: OpNode):
+    if node == root_node:
+      return True
+    if not node.op.name in ops:
+      counters = Counters(node.op)
+      ops[node.op.name] = counters
+    else:
+      counters = ops[node.op.name]
+    counters.count += node.invocation_count
+    counters.duration += node.cuml_total_duration_ns
+
+  if top_level_only:
+    for child in root_node.children:
+      visitor(child)
+  else:
+    root_node.traverse(visitor)
+
+  for op_name, counters in sorted(
+    ops.items(),
+    key=lambda item: item[1].duration,
+    reverse=True):
+    writer.write(f'{op_name}, {ns_duration_to_string(counters.duration)}, {counters.count}\n')
 
 class OpstractorSession:
   _stack: List[OpNode]
@@ -177,6 +235,9 @@ class OpstractorSession:
     if self._analyses_written:
       return
     self._analyses_written = True
+    write_distinct_op_table(
+      self._distinct_graphs,
+      sys.stderr)
     write_flame_graph(
       self._distinct_graphs,
       sys.stderr,
