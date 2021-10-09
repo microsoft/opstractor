@@ -1,6 +1,8 @@
 /.vscode/
-/logs/
-/build/
-*.so
-/*.egg-info/
 logs/
+build/
+*.so
+*.egg-info/
+__pycache__/
+logs/
+src/torch_opstractor/data/
