@@ -96,20 +96,36 @@ public:
   }
 };
 
+enum class OpCallScope : uint8_t {
+  FUNCTION = 0,
+  BACKWARD_FUNCTION,
+  TORCHSCRIPT_FUNCTION,
+  KERNEL_FUNCTION_DTYPE,
+  LITE_INTERPRETER,
+  USER_SCOPE
+};
+
 class OpCall final {
   const std::shared_ptr<const Op> op_;
+  const OpCallScope scope_;
   const OpDuration time_;
 
 public:
   explicit OpCall(
     std::shared_ptr<const Op> op,
+    OpCallScope scope,
     OpDuration time) :
       op_(op),
+      scope_(scope),
       time_(time) {
   }
 
   const std::shared_ptr<const Op> op() const {
     return op_;
+  }
+
+  OpCallScope scope() const {
+    return scope_;
   }
 
   OpDuration time() const {
@@ -123,6 +139,7 @@ public:
   static void pyBind(py::module& m) {
     py::class_<OpCall, std::shared_ptr<OpCall>>(m, "OpCall", py::is_final{})
       .def_property_readonly("op", &OpCall::op)
+      .def_property_readonly("scope", &OpCall::scope)
       .def_property_readonly("time_ns", &OpCall::timeNs);
   }
 };
@@ -233,6 +250,7 @@ PYBIND11_MODULE(_C, py_module) {
         op_table.getOrRegister(
           fn.name().str(),
           getOpSchema(fn)),
+        static_cast<OpCallScope>(fn.scope()),
         now_time - first_call_time_.value());
 
       py_op_call_(call);
