@@ -2,7 +2,6 @@
 # Licensed under the MIT License.
 
 import io
-import sys
 import atexit
 
 from typing import Callable, Optional, List, Dict
@@ -100,86 +99,67 @@ class OpNode:
         a.op.name == b.op.name and
           a.op.schema == b.op.schema)
 
-def ns_duration_to_string(ns: int):
-  if ns <= 1000:
-    return f'{ns}ns'
-  us = ns / float(1000)
-  if us <= 1000:
-    return f'{us}µs'
-  ms = ns / float(1000000)
-  if ms <= 1000:
-    return f'{ms}ms'
-  s = ns / float(1000000000)
-  return f'{s}s'
+class BinaryWriter:
+  _ops: Dict[int, Op]
+  _writer: io.BytesIO
 
-def write_flame_graph(
-  node: OpNode,
-  writer: io.StringIO,
-  value_producer: Callable[[Op], str]):
-  writer.write('{"name":"')
-  writer.write(node.op.schema if node.op.schema else node.op.name)
-  writer.write('","value":')
-  if node.invocation_count < 1:
-    writer.write('null')
-  else:
-    writer.write(value_producer(node))
-  if len(node.children) > 0:
-    writer.write(',"children":[')
-    for i, child in enumerate(node.children):
-      if i > 0:
-        writer.write(',')
-      write_flame_graph(child, writer, value_producer)
-    writer.write(']')
-  writer.write('}')
-  writer.flush()
+  def __init__(self, writer: io.BytesIO):
+    self._ops = {}
+    self._writer = writer
 
-def write_distinct_op_table(
-  root_node: OpNode,
-  writer: io.StringIO,
-  top_level_only = False):
-  class Counters:
-    def __init__(self, op: Op):
-      self.op = op
-      self.count = 0
-      self.duration = 0
+  def _write_uint16(self, value: int):
+    self._writer.write(value.to_bytes(2, byteorder='little', signed=False))
 
-  ops: Dict[str, Counters] = {}
+  def _write_uint32(self, value: int):
+    self._writer.write(value.to_bytes(4, byteorder='little', signed=False))
 
-  def visitor(node: OpNode):
-    if node == root_node:
-      return True
-    if not node.op.name in ops:
-      counters = Counters(node.op)
-      ops[node.op.name] = counters
+  def _write_string(self, value: str):
+    if not value or len(value) == 0:
+      self._write_uint16(0)
     else:
-      counters = ops[node.op.name]
-    counters.count += node.invocation_count
-    counters.duration += node.cuml_total_duration_ns
+      bytes = value.encode('utf8')
+      self._write_uint16(len(bytes))
+      self._writer.write(bytes)
 
-  if top_level_only:
-    for child in root_node.children:
-      visitor(child)
-  else:
-    root_node.traverse(visitor)
+  def write_op_node(self, node: OpNode):
+    tagged_handle = node.op.handle
+    if tagged_handle > 0x7fff:
+      raise OverflowError('op handle must be <= 0x7fff')
+    tagged_handle = tagged_handle << 1
 
-  for op_name, counters in sorted(
-    ops.items(),
-    key=lambda item: item[1].duration,
-    reverse=True):
-    writer.write(f'{op_name}, {ns_duration_to_string(counters.duration)}, {counters.count}\n')
+    if node.op.handle in self._ops:
+      self._write_uint16(tagged_handle | 1)
+    else:
+      self._ops[node.op.handle] = node.op
+      self._write_uint16(tagged_handle)
+      self._write_string(node.op.name)
+      self._write_string(node.op.schema)
+    self._write_uint32(node.invocation_count)
+    self._write_uint32(node.cuml_total_duration_ns)
+    self._write_uint16(len(node.children))
+    for child in node.children:
+      self.write_op_node(child)
+
+  def close(self):
+    self._writer.flush()
+    self._writer.close()
 
 class OpstractorSession:
   _stack: List[OpNode]
   _distinct_graphs: OpNode
   _total_graphs: int
   _analyses_written: bool
+  _writer: BinaryWriter
 
   def __init__(self):
     _C.install_session_hooks(
       self.op_call,
       self.op_ret)
 
+    self._writer = BinaryWriter(open('distinct_graphs.bin', 'wb'))
+
     root_op = Op()
+    root_op.handle = 0
     root_op.name = 'model'
     root_op.schema = None
     root_graph = OpNode(root_op, None)
@@ -190,7 +170,8 @@ class OpstractorSession:
     self._analyses_written = False
 
   def __del__(self):
-    self.write_analyses()
+    self._writer.write_op_node(self._distinct_graphs)
+    self._writer.close()
 
   def op_call(self, call: OpCall):
     parent_node: Optional[OpNode] = None
@@ -228,20 +209,9 @@ class OpstractorSession:
   def on_update(self):
     r = len(self._distinct_graphs.children) / float(self._total_graphs)
     if r < 0.005:
-      self.write_analyses()
+      self._writer.write_op_node(self._distinct_graphs)
+      self._writer.close()
       _C.terminate_session()
-
-  def write_analyses(self):
-    if self._analyses_written:
-      return
-    self._analyses_written = True
-    write_distinct_op_table(
-      self._distinct_graphs,
-      sys.stderr)
-    write_flame_graph(
-      self._distinct_graphs,
-      sys.stderr,
-      lambda node: str(node.invocation_count))
 
 default_session = OpstractorSession()
 
