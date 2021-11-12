@@ -1,0 +1,177 @@
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+table.tree-view {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table.tree-view tr:first-child {
+  background: #e0e0e0;
+}
+
+table.tree-view,
+table.tree-view tr:first-child {
+  border: 1px solid #ccc;
+}
+
+table.tree-view tr {
+  border: 1px solid #ddd;
+}
+
+table.tree-view tr:nth-child(2n) {
+  background: #f8f8f8;
+}
+
+table.tree-view th {
+  text-align: left;
+}
+
+table.tree-view th.sortable {
+  cursor: pointer;
+}
+
+table.tree-view th.sort-asc::after,
+table.tree-view th.sort-desc::after {
+  margin-left: 0.5em;
+}
+
+table.tree-view th.sort-asc::after {
+  content: '▲';
+}
+
+table.tree-view th.sort-desc::after {
+  content: '▼';
+}
+
+table.tree-view tr:hover {
+  background: rgb(197, 236, 255);
+  border: 1px solid rgb(101, 204, 255);
+}
+
+table.tree-view tr:hover td {
+  border-top: 1px solid rgb(101, 204, 255);
+}
+
+table.tree-view th,
+table.tree-view td {
+  vertical-align: top;
+  padding: 0.25em 0.5em;
+}
+
+table.tree-view .expander-column {
+  white-space: nowrap;
+  min-width: 10em;
+  width: 10em;
+}
+
+table.tree-view .expander-column.expandable {
+  cursor: pointer;
+}
+
+table.tree-view .expander-column .indent {
+  display: inline-block;
+  width: 0.5em;
+}
+
+table.tree-view .expander-column .expander {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  text-align: center;
+}
+
+table.tree-view .expander-column .expander::before {
+  content: "❯";
+}
+
+table.tree-view .expanded .expander-column .expander {
+  transform: rotate(90deg);
+}
+
+table.tree-view .expander-column:not(.expandable) .expander {
+  visibility: hidden;
+}
+
+table.tree-view .expander-column .text-cell {
+  margin-left: 0.25em;
+}
+
+table.tree-view .row-hidden {
+  display: none;
+}
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+span.schema {
+  font-size: 80%;
+  font-family: 'Cascadia Code', 'Fira Code', ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+}
+
+table.tree-view .col-id-count,
+table.tree-view .col-id-duration {
+  text-align: right;
+}
+
+span.duration span.unit {
+  opacity: 0.6;
+  padding-left: 0.25em;
+  font-size: 90%;
+}
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans',
+    'Helvetica Neue', sans-serif;
+}
+
+main {
+  margin: 1em 5em;
+  display: flex;
+}
+
+.profile-container {
+  flex-grow: 1;
+}
+
+.profile-list {
+  list-style: none;
+  margin: 0 1em 0 0;
+  padding: 0;
+  max-width: 20%;
+}
+
+.profile-list li {
+  overflow-wrap: break-word;
+  border: 1px solid #ddd;
+  background-color: #f8f8f8;
+  border-radius: 0.5em;
+  padding: 0.25em 0.5em;
+  margin-bottom: 0.5em;
+  cursor: pointer;
+}
+
+.profile-list li:hover,
+.profile-list li.selected {
+  background-color: rgb(197, 236, 255);
+  border-color: rgb(101, 204, 255);
+}
+
+.profile-view h1 {
+  margin: 0;
+  padding: 0;
+}
+
+.profile-view > * {
+  margin-bottom: 1em;
+}
