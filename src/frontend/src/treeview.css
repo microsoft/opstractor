@@ -1,0 +1,104 @@
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+table.tree-view {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table.tree-view tr:first-child {
+  background: #e0e0e0;
+}
+
+table.tree-view,
+table.tree-view tr:first-child {
+  border: 1px solid #ccc;
+}
+
+table.tree-view tr {
+  border: 1px solid #ddd;
+}
+
+table.tree-view tr:nth-child(2n) {
+  background: #f8f8f8;
+}
+
+table.tree-view th {
+  text-align: left;
+}
+
+table.tree-view th.sortable {
+  cursor: pointer;
+}
+
+table.tree-view th.sort-asc::after,
+table.tree-view th.sort-desc::after {
+  margin-left: 0.5em;
+}
+
+table.tree-view th.sort-asc::after {
+  content: '▲';
+}
+
+table.tree-view th.sort-desc::after {
+  content: '▼';
+}
+
+table.tree-view tr:hover {
+  background: rgb(197, 236, 255);
+  border: 1px solid rgb(101, 204, 255);
+}
+
+table.tree-view tr:hover td {
+  border-top: 1px solid rgb(101, 204, 255);
+}
+
+table.tree-view th,
+table.tree-view td {
+  vertical-align: top;
+  padding: 0.25em 0.5em;
+}
+
+table.tree-view .expander-column {
+  white-space: nowrap;
+  min-width: 10em;
+  width: 10em;
+}
+
+table.tree-view .expander-column.expandable {
+  cursor: pointer;
+}
+
+table.tree-view .expander-column .indent {
+  display: inline-block;
+  width: 0.5em;
+}
+
+table.tree-view .expander-column .expander {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  text-align: center;
+}
+
+table.tree-view .expander-column .expander::before {
+  content: "❯";
+}
+
+table.tree-view .expanded .expander-column .expander {
+  transform: rotate(90deg);
+}
+
+table.tree-view .expander-column:not(.expandable) .expander {
+  visibility: hidden;
+}
+
+table.tree-view .expander-column .text-cell {
+  margin-left: 0.25em;
+}
+
+table.tree-view .row-hidden {
+  display: none;
+}

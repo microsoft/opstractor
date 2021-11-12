@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+
+span.schema {
+  font-size: 80%;
+  font-family: 'Cascadia Code', 'Fira Code', ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+}
+
+table.tree-view .col-id-count,
+table.tree-view .col-id-duration {
+  text-align: right;
+}
+
+span.duration span.unit {
+  opacity: 0.6;
+  padding-left: 0.25em;
+  font-size: 90%;
+}
