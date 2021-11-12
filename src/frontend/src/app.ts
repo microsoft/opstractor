@@ -95,7 +95,7 @@ class FrontendSession {
 
   loadProfileList() {
     const httpClient = new XMLHttpRequest;
-    httpClient.open('GET', '/profiles/profiles.json');
+    httpClient.open('GET', 'profiles/profiles.json');
     httpClient.responseType = 'json';
     httpClient.onload = _ => {
       if (httpClient.readyState !== 4) {
@@ -114,7 +114,7 @@ class FrontendSession {
     function downloadError(error: any) {
       console.error('unable to load profile: %O', error);
     }
-    profileDataUrl = `/profiles/${profileDataUrl}`;
+    profileDataUrl = `profiles/${profileDataUrl}`;
     const httpClient = new XMLHttpRequest;
     httpClient.open('GET', profileDataUrl, true);
     httpClient.responseType = 'arraybuffer';
