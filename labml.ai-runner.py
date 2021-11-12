@@ -1,6 +1,10 @@
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+
 import pkgutil
 import subprocess
 import sys
+
 from dis import Bytecode
 from types import ModuleType
 from textwrap import dedent
@@ -26,8 +30,8 @@ for module in find_runnable_modules(__import__('labml_nn')):
   script = dedent(f'''
     import torch
     import torch_opstractor
+    torch_opstractor.default_session.init('{module}', 'profiles/{module}.bin')
     from {module} import main
     main()
   ''')
-  print(script)
   subprocess.run([sys.executable, '-c', script])

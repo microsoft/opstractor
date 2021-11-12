@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import io
+import os
 import atexit
 
 from typing import Callable, Optional, List, Dict
@@ -135,7 +136,7 @@ class BinaryWriter:
       self._write_string(node.op.name)
       self._write_string(node.op.schema)
     self._write_uint32(node.invocation_count)
-    self._write_uint32(node.cuml_total_duration_ns)
+    self._write_uint32(int(node.cuml_total_duration_ns / 1000))
     self._write_uint16(len(node.children))
     for child in node.children:
       self.write_op_node(child)
@@ -150,17 +151,23 @@ class OpstractorSession:
   _total_graphs: int
   _analyses_written: bool
   _writer: BinaryWriter
+  _initialized: bool
 
   def __init__(self):
+    self._initialized = False
     _C.install_session_hooks(
-      self.op_call,
-      self.op_ret)
+      self._op_call,
+      self._op_ret)
 
-    self._writer = BinaryWriter(open('distinct_graphs.bin', 'wb'))
+  def init(self, profile_name, profile_output_file):
+    outdir = os.path.dirname(profile_output_file)
+    if outdir and len(outdir) > 0:
+      os.makedirs(outdir, exist_ok=True)
+    self._writer = BinaryWriter(open(profile_output_file, 'wb'))
 
     root_op = Op()
     root_op.handle = 0
-    root_op.name = 'model'
+    root_op.name = profile_name
     root_op.schema = None
     root_graph = OpNode(root_op, None)
 
@@ -169,11 +176,19 @@ class OpstractorSession:
     self._total_graphs = 0
     self._analyses_written = False
 
-  def __del__(self):
-    self._writer.write_op_node(self._distinct_graphs)
-    self._writer.close()
+    self._initialized = True
 
-  def op_call(self, call: OpCall):
+  def __del__(self):
+    if self._writer:
+      self._writer.write_op_node(self._distinct_graphs)
+      self._writer.close()
+
+  def _op_call(self, call: OpCall):
+    if not self._initialized:
+      self.init(
+        'default_initialized_profile',
+        'default_initialized_profile.bin')
+
     parent_node: Optional[OpNode] = None
     if len(self._stack) > 0:
       parent_node = self._stack[-1]
@@ -187,13 +202,13 @@ class OpstractorSession:
 
     self._stack.append(node)
 
-  def op_ret(self, ret: OpRet):
+  def _op_ret(self, ret: OpRet):
     node = self._stack.pop()
     node.ret(ret)
     if len(self._stack) == 0:
-      self.log_op_node(node)
+      self._log_op_node(node)
 
-  def log_op_node(self, node: 'OpNode'):
+  def _log_op_node(self, node: 'OpNode'):
     self._total_graphs += 1
 
     merged = False
@@ -204,9 +219,9 @@ class OpstractorSession:
     if not merged:
       self._distinct_graphs.append_child(node)
 
-    self.on_update()
+    self._on_update()
 
-  def on_update(self):
+  def _on_update(self):
     r = len(self._distinct_graphs.children) / float(self._total_graphs)
     if r < 0.005:
       self._writer.write_op_node(self._distinct_graphs)
