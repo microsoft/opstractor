@@ -43,7 +43,7 @@ module.exports = {
         {
             apply: (compiler) => {
                 compiler.hooks.afterEmit.tap('afterEmit', () => {
-                    const shellexec = 'cp ../torch_opstractor/*.bin dist';
+                    const shellexec = './package-profiles.sh';
                     console.log(`> ${shellexec}`);
                     exec(shellexec);
                 });

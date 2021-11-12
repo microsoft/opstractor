@@ -115,7 +115,7 @@ export class BinaryOpNodeReader {
     return new OpNode(
       this.#readOp(),
       this.#readUint32(),
-      this.#readUint32(),
+      this.#readUint32() * 1000,
       this.#readOpNodeChildren());
   }
 }
