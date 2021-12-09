@@ -46,8 +46,20 @@ class OpNode:
   @property
   def cuml_total_duration_ns(self): return self._cuml_total_duration_ns
 
+  @cuml_total_duration_ns.setter
+  def cuml_total_duration_ns(self, value: int):
+    if self._cuml_total_duration_ns != 0:
+      raise ValueError("cuml_total_duration_ns is already set")
+    self._cuml_total_duration_ns = value      
+
   @property
   def invocation_count(self): return self._invocation_count
+
+  @invocation_count.setter
+  def invocation_count(self, value: int):
+    if self.invocation_count != 0:
+      raise ValueError("invocation_count is already set")
+    self._invocation_count = value      
 
   def __init__(self,
     op: Op,
@@ -145,6 +157,70 @@ class BinaryWriter:
     self._writer.flush()
     self._writer.close()
 
+class BinaryReader:
+  _ops: Dict[int, Op]
+  _reader: io.BytesIO
+
+  def __init__(self, reader: io.BytesIO):
+    self._ops = {}
+    self._reader = reader
+    self._sequence_id = 0
+
+  def _try_read_uint16(self) -> int:
+    bytes = self._reader.read(2)
+
+    if len(bytes) > 0:
+      return int.from_bytes(bytes, byteorder='little')
+    else:
+      return None
+
+  def _read_uint16(self) -> int:
+    return int.from_bytes(self._reader.read(2), byteorder='little')
+
+  def _read_uint32(self) -> int:
+    return int.from_bytes(self._reader.read(4), byteorder='little')
+
+  def _read_string(self):
+    len = self._read_uint16()
+
+    if len > 0:
+      bytes = self._reader.read(len)
+      return bytes.decode('utf8')
+    else:
+      return None
+
+  def read_op_node(self, parent: OpNode = None) -> OpNode:
+    handle = self._try_read_uint16()
+
+    if handle is None:
+      raise Exception("Could not find handle for next opnode")
+
+    op = Op()
+
+    if handle % 2 == 0:
+      op.handle = handle
+      op.name = self._read_string()
+      op.schema = self._read_string()
+      self._ops[op.handle] = op
+    else:
+      op = self._ops.get((handle & ~1))
+
+      if op is None:
+        raise Exception(f'Could not find op for key {handle &~1}')
+
+    opnode = OpNode(op, parent)
+    opnode.invocation_count = self._read_uint32()
+    opnode.cuml_total_duration_ns = self._read_uint32() * 1000
+
+    children_count = self._read_uint16()
+    for i in range(children_count):
+      opnode.append_child(self.read_op_node(parent=opnode))
+    
+    return opnode
+
+  def close(self):
+    self._reader.close()
+
 class OpstractorSession:
   _stack: List[OpNode]
   _distinct_graphs: OpNode
@@ -154,6 +230,7 @@ class OpstractorSession:
   _initialized: bool
 
   def __init__(self):
+    self._writer = None
     self._initialized = False
     _C.install_session_hooks(
       self._op_call,

@@ -1,0 +1,5 @@
+autopep8
+azure-kusto-data
+azure-kusto-ingest
+labml-nn
+pandas
