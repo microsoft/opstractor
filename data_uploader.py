@@ -52,7 +52,7 @@ kcsb = KustoConnectionStringBuilder.with_aad_application_key_authentication(
 mgmt_client = KustoClient(kcsb)
 
 # create table
-query = ".create table ModelOps (ModelName:string, OpHandle: int, OpName:string, OpSchema:string, InvocationCount:int, TotalDurationInNs:long, NumberChildren:int, ChildrenDurationInNs: long, ParentOpHandle: int, SequenceId: int)"
+query = ".create table ModelOps (ModelName:string, OpHandle: int, OpName:string, OpSchema:string, InvocationCount:int, TotalDurationInNs:long, NumberChildren:int, ChildrenDurationInNs: long, SequenceId: int, ParentPath: string)"
 mgmt_client.execute_mgmt(args.database, query)
 
 # reduce batch time span
@@ -71,21 +71,20 @@ ingestion_props = IngestionProperties(
 )
 
 fields = ["ModelName", "OpHandle", "OpName", "OpSchema", "InvocationCount",
-          "TotalDurationInNs", "NumberChildren", "ChildrenDurationInNs", "ParentOpHandle", "SequenceId"]
+          "TotalDurationInNs", "NumberChildren", "ChildrenDurationInNs", "SequenceId", "ParentPath"]
 
-
-def processChildren(root: OpNode, rows: List[OpNode], sequence_id: int):
-    for opNode in root.children:
+def processChildren(parent: OpNode, rows: List[OpNode], sequence_id: int):
+    for opNode in parent.children:
+        opNode.full_path = parent.full_path + str(sequence_id) + "/"
         children_total_duration_ms = sum(
             [x.cuml_total_duration_ns for x in opNode.children])
         row = [model, opNode.op.handle, opNode.op.name, opNode.op.schema, opNode.invocation_count,
-               opNode.cuml_total_duration_ns, len(
-                   opNode.children), children_total_duration_ms,
-               (opNode.parent.op.handle if opNode.parent != None else None),
-               sequence_id]
+               opNode.cuml_total_duration_ns,
+               len(opNode.children), children_total_duration_ms,
+               sequence_id, parent.full_path]
         rows.append(row)
         sequence_id += 1
-        processChildren(opNode, rows, sequence_id)
+        sequence_id = processChildren(opNode, rows, sequence_id)
 
     return sequence_id
 
@@ -98,6 +97,7 @@ for f in files_to_parse:
     root = reader.read_op_node()
     sequence_id = 0
 
+    root.full_path = "#/"
     processChildren(root, rows, sequence_id)
 
     if len(rows) > 0:
