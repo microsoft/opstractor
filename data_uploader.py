@@ -52,7 +52,7 @@ kcsb = KustoConnectionStringBuilder.with_aad_application_key_authentication(
 mgmt_client = KustoClient(kcsb)
 
 # create table
-query = ".create table ModelOps (ModelName:string, OpHandle: int, OpName:string, OpSchema:string, InvocationCount:int, TotalDurationInNs:long, NumberChildren:int, ChildrenDurationInNs: long, SequenceId: int, ParentPath: string)"
+query = ".create table ModelOps (ModelName:string, OpName:string, OpSchema:string, InvocationCount:int, TotalDuration_ns:long, NumberChildren:int, ChildrenDuration_ns: long, SequenceId: int, ParentPath: string)"
 mgmt_client.execute_mgmt(args.database, query)
 
 # reduce batch time span
@@ -70,15 +70,16 @@ ingestion_props = IngestionProperties(
     # ingestion_mapping_type=IngestionMappingType.JSON
 )
 
-fields = ["ModelName", "OpHandle", "OpName", "OpSchema", "InvocationCount",
-          "TotalDurationInNs", "NumberChildren", "ChildrenDurationInNs", "SequenceId", "ParentPath"]
+fields = ["ModelName", "OpName", "OpSchema", "InvocationCount",
+          "TotalDuration_ns", "NumberChildren", "ChildrenDuration_ns", "SequenceId", "ParentPath"]
+
 
 def processChildren(parent: OpNode, rows: List[OpNode], sequence_id: int):
     for opNode in parent.children:
         opNode.full_path = parent.full_path + str(sequence_id) + "/"
         children_total_duration_ms = sum(
             [x.cuml_total_duration_ns for x in opNode.children])
-        row = [model, opNode.op.handle, opNode.op.name, opNode.op.schema, opNode.invocation_count,
+        row = [model, opNode.op.name, opNode.op.schema, opNode.invocation_count,
                opNode.cuml_total_duration_ns,
                len(opNode.children), children_total_duration_ms,
                sequence_id, parent.full_path]
