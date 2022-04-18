@@ -4,7 +4,7 @@ rm -rf dist/profiles
 mkdir -p dist/profiles
 {
   echo '['
-  for profile in $(find ../../profiles -name \*.bin -and -size +100); do
+  for profile in $(find ../../profiles -name \*.bin); do
     cp "$profile" dist/profiles
     echo "  \"$(basename "$profile")\","
   done

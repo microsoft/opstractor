@@ -8,11 +8,14 @@ import sys
 from dis import Bytecode
 from types import ModuleType
 from textwrap import dedent
+import os
 
 def find_runnable_modules(module: ModuleType):
   for pkg in pkgutil.walk_packages(module.__path__, f'{module.__name__}.'):
     state = 0
-    for i in Bytecode(pkg.module_finder.get_code(pkg.name)):
+    importer = pkgutil.ImpImporter(pkg.module_finder.path)
+    
+    for i in Bytecode(importer.find_module(pkg.name).get_code()):
       if state == 0 and i.opname == 'LOAD_NAME' and i.argval == '__name__':
         state = 1
       elif state == 1 and i.opname == 'LOAD_CONST' and i.argval == '__main__':
@@ -24,14 +27,24 @@ def find_runnable_modules(module: ModuleType):
         state = 0
 
 for module in find_runnable_modules(__import__('labml_nn')):
+  output_file = f'profiles/{module}.bin'
+  if os.path.exists(output_file):
+    print(f'Skipping since {output_file} already exists')
+    continue
+
   if module == 'labml_nn.cfr.kuhn':
     continue
 
+  print(f'Working on module: {module}')
   script = dedent(f'''
     import torch
     import torch_opstractor
-    torch_opstractor.default_session.init('{module}', 'profiles/{module}.bin')
+    torch_opstractor.default_session.init('{module}', '{output_file}')
     from {module} import main
     main()
   ''')
-  subprocess.run([sys.executable, '-c', script])
+  result = subprocess.run([sys.executable, '-c', script])
+
+  if result.returncode != 0:
+    print(f'Error {result.returncode} deleting file {output_file}')
+    os.remove(output_file)
