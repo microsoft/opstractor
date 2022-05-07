@@ -4,10 +4,10 @@ from torch_opstractor import BinaryReader, OpNode
 from typing import List
 import argparse
 from azure.kusto.data import KustoConnectionStringBuilder, KustoClient
+from azure.kusto.data.data_format import DataFormat
 from azure.kusto.ingest import (
     QueuedIngestClient,
-    IngestionProperties,
-    DataFormat
+    IngestionProperties
 )
 import pandas
 import glob
@@ -52,7 +52,7 @@ kcsb = KustoConnectionStringBuilder.with_aad_application_key_authentication(
 mgmt_client = KustoClient(kcsb)
 
 # create table
-query = ".create table ModelOps (ModelName:string, OpName:string, OpSchema:string, InvocationCount:int, TotalDuration_ns:long, NumberChildren:int, ChildrenDuration_ns: long, SequenceId: int, ParentPath: string)"
+query = ".create table ModelOps (ModelName:string, OpName:string, OpSchema:string, Inputs: string, InvocationCount:int, TotalDuration_ns:long, NumberChildren:int, ChildrenDuration_ns: long, SequenceId: int, ParentPath: string)"
 mgmt_client.execute_mgmt(args.database, query)
 
 # reduce batch time span
@@ -70,7 +70,7 @@ ingestion_props = IngestionProperties(
     # ingestion_mapping_type=IngestionMappingType.JSON
 )
 
-fields = ["ModelName", "OpName", "OpSchema", "InvocationCount",
+fields = ["ModelName", "OpName", "OpSchema", "Inputs", "InvocationCount",
           "TotalDuration_ns", "NumberChildren", "ChildrenDuration_ns", "SequenceId", "ParentPath"]
 
 
@@ -79,7 +79,7 @@ def processChildren(parent: OpNode, rows: List[OpNode], sequence_id: int):
         opNode.full_path = parent.full_path + str(sequence_id) + "/"
         children_total_duration_ms = sum(
             [x.cuml_total_duration_ns for x in opNode.children])
-        row = [model, opNode.op.name, opNode.op.schema, opNode.invocation_count,
+        row = [model, opNode.op_call.op.name, opNode.op_call.op.schema, opNode.op_call.inputs, opNode.invocation_count,
                opNode.cuml_total_duration_ns,
                len(opNode.children), children_total_duration_ms,
                sequence_id, parent.full_path]
@@ -92,14 +92,20 @@ def processChildren(parent: OpNode, rows: List[OpNode], sequence_id: int):
 
 for f in files_to_parse:
     print(f'Working on model {f}')
+
+    if os.path.getsize(f) == 0:
+      print(f'Skipping {f} because its empty')
+      continue
+
     rows = []
     reader = BinaryReader(open(f, mode="rb"))
-    model = os.path.basename(f).replace('.bin', '')
     root = reader.read_op_node()
     sequence_id = 0
 
     root.full_path = "#/"
+    model = root.op_call.op.name
     processChildren(root, rows, sequence_id)
+    batch_size = 100000
 
     if len(rows) > 0:
         query = f'.show table ModelOps extents where tags has "drop-by:{model}"'
@@ -111,10 +117,12 @@ for f in files_to_parse:
             query = f".drop extent {existing['ExtentId']} from ModelOps"
             mgmt_client.execute_mgmt(args.database, query)
 
-        print(f'Sending {len(rows)} rows to Azure Data Explorer')
-        df = pandas.DataFrame(data=rows, columns=fields)
-        ingestion_props.drop_by_tags = [model]
-        ingestion_client.ingest_from_dataframe(
-            df, ingestion_properties=ingestion_props)
+        for x in range(0, len(rows), batch_size):
+          print(f'Sending rows [{x}:{x + (batch_size-1)}]')
+          df = pandas.DataFrame(data=rows[x:x + (batch_size - 1)], columns=fields)
+          ingestion_props.drop_by_tags = [model]
+          ingestion_client.ingest_from_dataframe(
+              df, ingestion_properties=ingestion_props)
 
+        print(f'Total rows sent: {len(rows)}')
     reader.close()

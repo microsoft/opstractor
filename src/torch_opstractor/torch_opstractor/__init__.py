@@ -11,6 +11,7 @@ import torch
 from . import _C
 
 #region Typings as exported from C++
+hash_prime = 31
 
 class Op:
   handle: int
@@ -19,7 +20,13 @@ class Op:
 
 class OpCall:
   op: Op
-  time_ns: int
+  inputs: str
+
+  def __init__(self,
+    op: Op,
+    inputs: str):  
+    self.op = op
+    self.inputs = inputs
 
 class OpRet:
   call: OpCall
@@ -28,14 +35,14 @@ class OpRet:
 #endregion
 
 class OpNode:
-  _op: Op
+  _op_call: OpCall
   _parent: Optional['OpNode']
   _children: List['OpNode']
   _cuml_total_duration_ns: int
   _invocation_count: int
 
   @property
-  def op(self): return self._op
+  def op_call(self): return self._op_call
 
   @property
   def parent(self): return self._parent
@@ -62,9 +69,9 @@ class OpNode:
     self._invocation_count = value      
 
   def __init__(self,
-    op: Op,
+    op_call: OpCall,
     parent: Optional['OpNode'] = None):
-    self._op = op
+    self._op_call = op_call
     self._parent = parent
     self._children = []
     self._cuml_total_duration_ns = 0
@@ -104,13 +111,28 @@ class OpNode:
       return False
     return True
 
-  def is_same_by_name(self, other: 'OpNode'):
+  def __hash__(self) -> int:
+    hash_prime = 31
+    result = hash(self._op_call.op.name)
+    result = (result * hash_prime) + hash(self._op_call.op.schema)
+    result = (result * hash_prime) + hash(self._op_call.inputs)
+
+    for child in self._children:
+      result = (result * hash_prime) + hash(child)
+
+    return result
+
+  def __eq__(self, other: 'OpNode') -> bool:
+      return self.is_same_by_op_call(other)       
+
+  def is_same_by_op_call(self, other: 'OpNode'):
     return OpNode.traverse2(
       self,
       other,
       lambda a, b:
-        a.op.name == b.op.name and
-          a.op.schema == b.op.schema)
+        a.op_call.op.name == b.op_call.op.name and
+          a.op_call.op.schema == b.op_call.op.schema and
+          a.op_call.inputs == b.op_call.inputs)
 
 class BinaryWriter:
   _ops: Dict[int, Op]
@@ -135,18 +157,19 @@ class BinaryWriter:
       self._writer.write(bytes)
 
   def write_op_node(self, node: OpNode):
-    tagged_handle = node.op.handle
+    tagged_handle = node.op_call.op.handle
     if tagged_handle > 0x7fff:
       raise OverflowError('op handle must be <= 0x7fff')
     tagged_handle = tagged_handle << 1
 
-    if node.op.handle in self._ops:
+    if node.op_call.op.handle in self._ops:
       self._write_uint16(tagged_handle | 1)
     else:
-      self._ops[node.op.handle] = node.op
+      self._ops[node.op_call.op.handle] = node.op_call.op
       self._write_uint16(tagged_handle)
-      self._write_string(node.op.name)
-      self._write_string(node.op.schema)
+      self._write_string(node.op_call.op.name)
+      self._write_string(node.op_call.op.schema)
+    self._write_string(node.op_call.inputs)
     self._write_uint32(node.invocation_count)
     self._write_uint32(int(node.cuml_total_duration_ns / 1000))
     self._write_uint16(len(node.children))
@@ -208,7 +231,9 @@ class BinaryReader:
       if op is None:
         raise Exception(f'Could not find op for key {handle &~1}')
 
-    opnode = OpNode(op, parent)
+    inputs = self._read_string()
+    op_call = OpCall(op, inputs)
+    opnode = OpNode(op_call, parent)
     opnode.invocation_count = self._read_uint32()
     opnode.cuml_total_duration_ns = self._read_uint32() * 1000
 
@@ -223,11 +248,13 @@ class BinaryReader:
 
 class OpstractorSession:
   _stack: List[OpNode]
-  _distinct_graphs: OpNode
+  _root_node: OpNode
+  _distinct_children: Dict[OpNode, OpNode]
   _total_graphs: int
   _analyses_written: bool
   _writer: BinaryWriter
   _initialized: bool
+  _enable_early_exit: bool
 
   def __init__(self):
     self._writer = None
@@ -236,7 +263,9 @@ class OpstractorSession:
       self._op_call,
       self._op_ret)
 
-  def init(self, profile_name, profile_output_file):
+  def init(self, profile_name, profile_output_file, enable_early_exit=True):
+    if self._initialized:
+      raise Exception("init already called")
     outdir = os.path.dirname(profile_output_file)
     if outdir and len(outdir) > 0:
       os.makedirs(outdir, exist_ok=True)
@@ -246,19 +275,23 @@ class OpstractorSession:
     root_op.handle = 0
     root_op.name = profile_name
     root_op.schema = None
-    root_graph = OpNode(root_op, None)
 
     self._stack = []
-    self._distinct_graphs = root_graph
+    self._root_node = OpNode(OpCall(root_op, inputs=""), None)
     self._total_graphs = 0
     self._analyses_written = False
-
+    self._enable_early_exit = enable_early_exit
+    self._distinct_children = {}
     self._initialized = True
 
-  def __del__(self):
+  def flush(self):
     if self._writer:
-      self._writer.write_op_node(self._distinct_graphs)
+      self._writer.write_op_node(self._root_node)
       self._writer.close()
+      self._writer = None
+
+  def __del__(self):
+    self.flush()
 
   def _op_call(self, call: OpCall):
     if not self._initialized:
@@ -271,7 +304,7 @@ class OpstractorSession:
       parent_node = self._stack[-1]
 
     node = OpNode(
-      call.op,
+      call,
       parent_node)
 
     if parent_node:
@@ -288,27 +321,32 @@ class OpstractorSession:
   def _log_op_node(self, node: 'OpNode'):
     self._total_graphs += 1
 
-    merged = False
-    for distinct_graph in self._distinct_graphs.children:
-      if distinct_graph.is_same_by_name(node):
-        distinct_graph.merge(node)
-        merged = True
-    if not merged:
-      self._distinct_graphs.append_child(node)
+    existing_node = self._distinct_children.get(node)
+
+    if existing_node is not None:
+      existing_node.merge(node)
+    else:
+      self._distinct_children[node] = node
+      self._root_node.append_child(node)
 
     self._on_update()
 
   def _on_update(self):
-    r = len(self._distinct_graphs.children) / float(self._total_graphs)
-    if r < 0.005:
-      self._writer.write_op_node(self._distinct_graphs)
-      self._writer.close()
-      _C.terminate_session()
+    if self._enable_early_exit:
+      r = len(self._distinct_children) / float(self._total_graphs)
+      if r < 0.01:
+        self.flush()
+        _C.terminate_session()
 
 default_session = OpstractorSession()
 
 def _atexit():
   global default_session
   del default_session
+
+def reset_session():
+  global default_session
+  del default_session
+  default_session = OpstractorSession()
 
 atexit.register(_atexit)

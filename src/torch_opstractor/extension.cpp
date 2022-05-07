@@ -96,6 +96,8 @@ public:
   }
 };
 
+static OpTable op_table{};
+
 enum class OpCallScope : uint8_t {
   FUNCTION = 0,
   BACKWARD_FUNCTION,
@@ -106,41 +108,192 @@ enum class OpCallScope : uint8_t {
 };
 
 class OpCall final {
-  const std::shared_ptr<const Op> op_;
-  const OpCallScope scope_;
+  std::shared_ptr<const Op> op_;
+  OpCallScope scope_;
   const OpDuration time_;
+  std::string inputs_;
+
+const std::string dumpInput(const at::IValue& input)
+{
+  if (input.isTensor())
+  {
+    std::stringstream ss;
+    ss << "Tensor(";
+    const auto& sizes = input.toTensor().sizes();
+    for (size_t i=0; i < sizes.size(); ++i)
+    {
+      ss << sizes[i];
+
+      if (i < sizes.size() - 1)
+      {
+        ss << ", ";
+      }
+    }            
+    ss << ")";
+    return ss.str();
+  }
+  else if (input.isStorage()) 
+  {
+    return "Storage";
+  }
+  else if (input.isDouble())
+  {
+    return std::to_string(input.toDouble());
+  }
+  else if (input.isComplexDouble())
+  {
+    return "ComplexDouble";
+  }
+  else if (input.isInt())
+  {
+    return std::to_string(input.toInt());
+  }
+  else if (input.isBool())
+  {
+    return std::to_string(input.toBool());
+  }
+  else if (input.isTuple())
+  {
+    std::cout << "Tuple" << '\n';
+  }
+  else if (input.isString())
+  {
+    return input.toStringRef();
+  }
+  else if (input.isBlob())
+  {
+    return "Blob";
+  }
+  else if (input.isList())
+  {
+    std::stringstream ss;
+    ss << "(";
+    const auto& list = input.toList();
+    
+    for (size_t i=0; i < list.size(); ++i)
+    {
+      ss << dumpInput(list[i]);
+
+      if (i < list.size() - 1)
+      {
+        ss << ",";
+      }
+    }
+    ss << ")";
+
+    return ss.str();
+  }
+  else if (input.isGenericDict())
+  {
+    return "GenericDict";
+  }
+  else if (input.isFuture())
+  {
+    return "Future";
+  }
+  else if (input.isDevice())
+  {
+    const auto& device = input.toDevice();
+    std::stringstream ss;
+    ss << "Device(" << device.type() << "," << std::to_string(device.index()) << ")";
+    return ss.str();
+  }
+  else if (input.isStream())
+  {
+    return "Stream(" + std::to_string(input.toInt()) + ")";
+  }
+  else if (input.isObject())
+  {
+    return "Object";
+  }
+  else if (input.isPyObject())
+  {
+    return "PyObject";
+  }
+  else if (input.isCapsule())
+  {
+    return "Capsule";
+  }
+  else if (input.isRRef())
+  {
+    return "RRef";
+  }
+  else if (input.isQuantizer())
+  {
+    return "Quantizer";
+  }
+  else if (input.isGenerator())
+  {
+    return "Generator";
+  }
+  else if (input.isEnum())
+  {
+    return "Enum";
+  }
+  else if (input.isNone())
+  {
+    return input.toNone();
+  }
+
+  return "Unknown";
+}
+
+const std::optional<const std::string> getOpSchema(
+  const at::RecordFunction& fn) {
+  if (fn.operator_name().has_value()) {
+    const auto op = c10::Dispatcher::singleton().findOp(
+      fn.operator_name().value());
+    if (op.has_value() && op.value().hasSchema()) {
+      return toString(op.value().schema());
+    }
+  }
+  return {};
+}
 
 public:
   explicit OpCall(
-    std::shared_ptr<const Op> op,
-    OpCallScope scope,
+    const at::RecordFunction& fn,
     OpDuration time) :
-      op_(op),
-      scope_(scope),
       time_(time) {
+
+      op_ = op_table.getOrRegister(
+          std::string(fn.name()),
+          getOpSchema(fn));
+
+      scope_ = static_cast<OpCallScope>(fn.scope());      
+
+      const auto& inputs = fn.inputs();
+      std::stringstream input_ss;
+      input_ss << "(";
+      for (size_t i=0; i < inputs.size(); ++i)
+      {
+        input_ss << dumpInput(inputs[i]);
+
+        if (i < inputs.size() - 1)
+        {
+          input_ss << ",";
+        }
+      }
+      input_ss << ")";
+      inputs_ = input_ss.str();
   }
 
   const std::shared_ptr<const Op> op() const {
     return op_;
   }
 
-  OpCallScope scope() const {
-    return scope_;
-  }
-
-  OpDuration time() const {
+  const OpDuration time() const {
     return time_;
   }
 
-  int64_t timeNs() const {
-    return std::chrono::nanoseconds(time_).count();
+  const std::string& inputs() const {
+    return inputs_;
   }
 
   static void pyBind(py::module& m) {
     py::class_<OpCall, std::shared_ptr<OpCall>>(m, "OpCall", py::is_final{})
       .def_property_readonly("op", &OpCall::op)
-      .def_property_readonly("scope", &OpCall::scope)
-      .def_property_readonly("time_ns", &OpCall::timeNs);
+      .def_property_readonly("inputs", &OpCall::inputs);
   }
 };
 
@@ -189,25 +342,12 @@ public:
   }
 };
 
-static const std::optional<const std::string> getOpSchema(
-  const at::RecordFunction& fn) {
-  if (fn.operator_name().has_value()) {
-    const auto op = c10::Dispatcher::singleton().findOp(
-      fn.operator_name().value());
-    if (op.has_value() && op.value().hasSchema()) {
-      return toString(op.value().schema());
-    }
-  }
-  return {};
-}
-
 using PyOpCallFunc = std::function<void(const std::shared_ptr<OpCall>)>;
 using PyOpRetFunc = std::function<void(const std::shared_ptr<OpRet>)>;
 
 static PyOpCallFunc py_op_call_ = nullptr;
 static PyOpRetFunc py_op_ret_ = nullptr;
 
-static OpTable op_table{};
 static std::optional<std::chrono::time_point<OpClock>> first_call_time_{};
 
 PYBIND11_MODULE(_C, py_module) {
@@ -247,10 +387,7 @@ PYBIND11_MODULE(_C, py_module) {
       }
 
       const auto call = std::make_shared<OpCall>(
-        op_table.getOrRegister(
-          fn.name().str(),
-          getOpSchema(fn)),
-        static_cast<OpCallScope>(fn.scope()),
+        fn,
         now_time - first_call_time_.value());
 
       py_op_call_(call);
